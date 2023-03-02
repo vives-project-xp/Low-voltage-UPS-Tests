@@ -83,6 +83,7 @@ void app_main(void)
 
     while (1) {
         ESP_LOGI(TAG, "Turning the LED %s!", s_led_state == true ? "ON" : "OFF");
+        ESP_LOGI(TAG, "Hello World!");
         blink_led();
         /* Toggle the LED state */
         s_led_state = !s_led_state;
