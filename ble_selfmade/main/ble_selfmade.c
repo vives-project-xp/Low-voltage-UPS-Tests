@@ -25,7 +25,7 @@
 #include "esp_gap_ble_api.h"
 #include "esp_gatts_api.h"
 #include "esp_bt_main.h"
-#include "gatts_table_creat_demo.h"
+#include "gatts_table.h"
 #include "esp_gatt_common_api.h"
 
 #define GATTS_TABLE_TAG "GATTS_TABLE_DEMO"
@@ -66,8 +66,9 @@ static uint8_t raw_adv_data[] = {
     /* tx power*/
     0x02, 0x0a, 0xeb,
     /* service uuid */
-    0x03, 0x03, 0xFF, 0x00};
+    0x03, 0x03, 0xFF, 0x00,
     /* device name */
+    0x06, 0x09, 'U', 'P', 'S', '-', '1'};
 static uint8_t raw_scan_rsp_data[] = {
     /* flags */
     0x02, 0x01, 0x06,
@@ -174,15 +175,27 @@ static const uint16_t GATTS_SERVICE_UUID_TEST = 0x00FF;
 static const uint16_t GATTS_CHAR_UUID_TEST_A = 0xFF01;
 static const uint16_t GATTS_CHAR_UUID_TEST_B = 0xFF02;
 static const uint16_t GATTS_CHAR_UUID_TEST_C = 0xFF03;
+static const uint16_t GATTS_CHAR_UUID_D = 0xFF04;
 
 static const uint16_t primary_service_uuid = ESP_GATT_UUID_PRI_SERVICE;
 static const uint16_t character_declaration_uuid = ESP_GATT_UUID_CHAR_DECLARE;
-static const uint16_t character_client_config_uuid = ESP_GATT_UUID_CHAR_CLIENT_CONFIG;
-//static const uint8_t char_prop_read = ESP_GATT_CHAR_PROP_BIT_READ;
-static const uint8_t char_prop_write = ESP_GATT_CHAR_PROP_BIT_WRITE;
-//static const uint8_t char_prop_read_write_notify = ESP_GATT_CHAR_PROP_BIT_WRITE | ESP_GATT_CHAR_PROP_BIT_READ | ESP_GATT_CHAR_PROP_BIT_NOTIFY;
-static const uint8_t heart_measurement_ccc[2] = {0x00, 0x00};
+// static const uint16_t character_client_config_uuid = ESP_GATT_UUID_CHAR_CLIENT_CONFIG;
+// static const uint8_t char_prop_read = ESP_GATT_CHAR_PROP_BIT_READ;
+// static const uint8_t char_prop_write = ESP_GATT_CHAR_PROP_BIT_WRITE;
+static const uint8_t char_prop_read_write = ESP_GATT_CHAR_PROP_BIT_READ | ESP_GATT_CHAR_PROP_BIT_WRITE; 
+static const uint8_t char_prop_read_write_notify = ESP_GATT_CHAR_PROP_BIT_WRITE | ESP_GATT_CHAR_PROP_BIT_READ | ESP_GATT_CHAR_PROP_BIT_NOTIFY;
+
 static const uint8_t char_value[4] = {0x11, 0x22, 0x33, 0x44};
+
+char ssid[32] = {""};
+char pass[64] = {""};
+char mqtt[21] = {""};
+bool bluetooth_online = false;
+
+int ssid_handle = 30;
+int pass_handle = 31;
+int mqtt_handle = 32;
+int cnt = 0;
 
 /* Full Database Description - Used to add attributes into the database */
 static const esp_gatts_attr_db_t gatt_db[HRS_IDX_NB] =
@@ -193,19 +206,15 @@ static const esp_gatts_attr_db_t gatt_db[HRS_IDX_NB] =
 
         /* Characteristic Declaration */
         [IDX_CHAR_A] =
-            {{ESP_GATT_AUTO_RSP}, {ESP_UUID_LEN_16, (uint8_t *)&character_declaration_uuid, ESP_GATT_PERM_READ, CHAR_DECLARATION_SIZE, CHAR_DECLARATION_SIZE, (uint8_t *)&char_prop_write}},
+            {{ESP_GATT_AUTO_RSP}, {ESP_UUID_LEN_16, (uint8_t *)&character_declaration_uuid, ESP_GATT_PERM_READ, CHAR_DECLARATION_SIZE, CHAR_DECLARATION_SIZE, (uint8_t *)&char_prop_read_write}},
 
         /* Characteristic Value */
         [IDX_CHAR_VAL_A] =
             {{ESP_GATT_AUTO_RSP}, {ESP_UUID_LEN_16, (uint8_t *)&GATTS_CHAR_UUID_TEST_A, ESP_GATT_PERM_READ | ESP_GATT_PERM_WRITE, GATTS_DEMO_CHAR_VAL_LEN_MAX, sizeof(char_value), (uint8_t *)char_value}},
 
-        /* Client Characteristic Configuration Descriptor */
-        [IDX_CHAR_CFG_A] =
-            {{ESP_GATT_AUTO_RSP}, {ESP_UUID_LEN_16, (uint8_t *)&character_client_config_uuid, ESP_GATT_PERM_READ | ESP_GATT_PERM_WRITE, sizeof(uint16_t), sizeof(heart_measurement_ccc), (uint8_t *)heart_measurement_ccc}},
-
         /* Characteristic Declaration */
         [IDX_CHAR_B] =
-            {{ESP_GATT_AUTO_RSP}, {ESP_UUID_LEN_16, (uint8_t *)&character_declaration_uuid, ESP_GATT_PERM_READ, CHAR_DECLARATION_SIZE, CHAR_DECLARATION_SIZE, (uint8_t *)&char_prop_write}},
+            {{ESP_GATT_AUTO_RSP}, {ESP_UUID_LEN_16, (uint8_t *)&character_declaration_uuid, ESP_GATT_PERM_READ, CHAR_DECLARATION_SIZE, CHAR_DECLARATION_SIZE, (uint8_t *)&char_prop_read_write}},
 
         /* Characteristic Value */
         [IDX_CHAR_VAL_B] =
@@ -213,11 +222,19 @@ static const esp_gatts_attr_db_t gatt_db[HRS_IDX_NB] =
 
         /* Characteristic Declaration */
         [IDX_CHAR_C] =
-            {{ESP_GATT_AUTO_RSP}, {ESP_UUID_LEN_16, (uint8_t *)&character_declaration_uuid, ESP_GATT_PERM_READ, CHAR_DECLARATION_SIZE, CHAR_DECLARATION_SIZE, (uint8_t *)&char_prop_write}},
+            {{ESP_GATT_AUTO_RSP}, {ESP_UUID_LEN_16, (uint8_t *)&character_declaration_uuid, ESP_GATT_PERM_READ, CHAR_DECLARATION_SIZE, CHAR_DECLARATION_SIZE, (uint8_t *)&char_prop_read_write}},
 
         /* Characteristic Value */
         [IDX_CHAR_VAL_C] =
             {{ESP_GATT_AUTO_RSP}, {ESP_UUID_LEN_16, (uint8_t *)&GATTS_CHAR_UUID_TEST_C, ESP_GATT_PERM_READ | ESP_GATT_PERM_WRITE, GATTS_DEMO_CHAR_VAL_LEN_MAX, sizeof(char_value), (uint8_t *)char_value}},
+
+        /* Characteristic Declaration */
+        [IDX_CHAR_D] =
+            {{ESP_GATT_AUTO_RSP}, {ESP_UUID_LEN_16, (uint8_t *)&character_declaration_uuid, ESP_GATT_PERM_READ, CHAR_DECLARATION_SIZE, CHAR_DECLARATION_SIZE, (uint8_t *)&char_prop_read_write_notify}},
+
+        /* Characteristic Value */
+        [IDX_CHAR_VAL_D] =
+            {{ESP_GATT_AUTO_RSP}, {ESP_UUID_LEN_16, (uint8_t *)&GATTS_CHAR_UUID_D, ESP_GATT_PERM_READ | ESP_GATT_PERM_WRITE, GATTS_DEMO_CHAR_VAL_LEN_MAX, sizeof(char_value), (uint8_t *)char_value}},
 
 };
 
@@ -373,7 +390,7 @@ static void gatts_profile_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_
     {
     case ESP_GATTS_REG_EVT:
     {
-        esp_err_t set_dev_name_ret = esp_ble_gap_set_device_name("UPS-1");
+        esp_err_t set_dev_name_ret = esp_ble_gap_set_device_name(SAMPLE_DEVICE_NAME);
         if (set_dev_name_ret)
         {
             ESP_LOGE(GATTS_TABLE_TAG, "set device name failed, error code = %x", set_dev_name_ret);
@@ -416,49 +433,43 @@ static void gatts_profile_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_
     break;
     case ESP_GATTS_READ_EVT:
         ESP_LOGI(GATTS_TABLE_TAG, "ESP_GATTS_READ_EVT");
+        switch (cnt)
+        {
+        case 0:
+            ssid_handle = param->write.handle;
+            cnt = 1;
+            break;
+        case 1:
+            pass_handle = param->write.handle;
+            cnt = 2;
+            break;
+        case 2:
+            mqtt_handle = param->write.handle;
+            cnt = 0;
+            break;
+        default:
+            break;
+        }
+        ESP_LOGI(GATTS_TABLE_TAG, "ssid_handle: %d, pass_handle: %d, mqtt_handle: %d", ssid_handle, pass_handle, mqtt_handle);
         break;
     case ESP_GATTS_WRITE_EVT:
         if (!param->write.is_prep)
         {
             // the data length of gattc write  must be less than GATTS_DEMO_CHAR_VAL_LEN_MAX.
             ESP_LOGI(GATTS_TABLE_TAG, "GATT_WRITE_EVT, handle = %d, value len = %d, value :", param->write.handle, param->write.len);
-            esp_log_buffer_hex(GATTS_TABLE_TAG, param->write.value, param->write.len);
-            if (heart_rate_handle_table[IDX_CHAR_CFG_A] == param->write.handle && param->write.len == 2)
+            ESP_LOGI(GATTS_TABLE_TAG, "%s", param->write.value);
+            int lenght = param->write.len;
+            if (param->write.handle == ssid_handle)
             {
-                uint16_t descr_value = param->write.value[1] << 8 | param->write.value[0];
-                if (descr_value == 0x0001)
-                {
-                    ESP_LOGI(GATTS_TABLE_TAG, "notify enable");
-                    uint8_t notify_data[15];
-                    for (int i = 0; i < sizeof(notify_data); ++i)
-                    {
-                        notify_data[i] = i % 0xff;
-                    }
-                    // the size of notify_data[] need less than MTU size
-                    esp_ble_gatts_send_indicate(gatts_if, param->write.conn_id, heart_rate_handle_table[IDX_CHAR_VAL_A],
-                                                sizeof(notify_data), notify_data, false);
-                }
-                else if (descr_value == 0x0002)
-                {
-                    ESP_LOGI(GATTS_TABLE_TAG, "indicate enable");
-                    uint8_t indicate_data[15];
-                    for (int i = 0; i < sizeof(indicate_data); ++i)
-                    {
-                        indicate_data[i] = i % 0xff;
-                    }
-                    // the size of indicate_data[] need less than MTU size
-                    esp_ble_gatts_send_indicate(gatts_if, param->write.conn_id, heart_rate_handle_table[IDX_CHAR_VAL_A],
-                                                sizeof(indicate_data), indicate_data, true);
-                }
-                else if (descr_value == 0x0000)
-                {
-                    ESP_LOGI(GATTS_TABLE_TAG, "notify/indicate disable ");
-                }
-                else
-                {
-                    ESP_LOGE(GATTS_TABLE_TAG, "unknown descr value");
-                    esp_log_buffer_hex(GATTS_TABLE_TAG, param->write.value, param->write.len);
-                }
+                memcpy(ssid, param->write.value, lenght);
+            }
+            else if (param->write.handle == pass_handle)
+            {
+                memcpy(pass, param->write.value, lenght);
+            }
+            else if (param->write.handle == mqtt_handle)
+            {
+                memcpy(mqtt, param->write.value, lenght);
             }
             /* send response when param->write.need_rsp is true*/
             if (param->write.need_rsp)
@@ -571,8 +582,7 @@ static void gatts_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_
     } while (0);
 }
 
-void app_main(void)
-{
+void ble_setup(void){
     esp_err_t ret;
 
     /* Initialize NVS. */
@@ -640,5 +650,25 @@ void app_main(void)
     if (local_mtu_ret)
     {
         ESP_LOGE(GATTS_TABLE_TAG, "set local  MTU failed, error code = %x", local_mtu_ret);
+    }
+
+    bluetooth_online = true;
+}
+
+void app_main(void)
+{
+    ble_setup();
+    
+    while (1)
+    {
+        if (strlen(ssid) != 0 && strlen(pass) != 0 && strlen(mqtt) != 0 && bluetooth_online == true)
+        {
+            ESP_LOGI("SETTINGS", "ACCEPTED");
+            esp_bluedroid_disable();
+            // esp_bluedroid_deinit();
+            esp_bt_controller_disable();
+            // esp_bt_controller_deinit();
+        }
+        vTaskDelay(100);
     }
 }

@@ -110,7 +110,7 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
     switch ((esp_mqtt_event_id_t)event_id) {
     case MQTT_EVENT_CONNECTED:
         ESP_LOGI("MQTT", "MQTT_EVENT_CONNECTED");
-        msg_id = esp_mqtt_client_publish(intrnclient, "homeassistant/battery/state", handler_args, 0, 1, 0);
+        msg_id = esp_mqtt_client_publish(intrnclient, "homeassistant/battery/Status", handler_args, 0, 1, 0);
         ESP_LOGI("MQTT", "sent publish successful, msg_id=%d", msg_id);
 
         msg_id = esp_mqtt_client_subscribe(intrnclient, "homeassistant/battery/reset", 0);
@@ -170,7 +170,7 @@ static void mqtt_app_start(void)
 static void mqtt_publish_task(char *message)
 {
     int message_id;
-    message_id = esp_mqtt_client_publish(client, "homeassistant/battery/state", message, 0, 0, 0);
+    message_id = esp_mqtt_client_publish(client, "homeassistant/battery/Status", message, 0, 0, 0);
     ESP_LOGI("MQTT", "Published message with ID %d: %s", message_id, message);
 }
 
@@ -207,7 +207,7 @@ void app_main(void)
         //
         //mqtt message publish
         char message[30];
-        sprintf(message, "LED is %s!", led_state == true ? "ON" : "OFF");
+        sprintf(message, "%s", led_state == true ? "1" : "0");
         mqtt_publish_task(message);
         //
         vTaskDelay(100); // Add 1 tick delay (10 ms) so that current task does not starve idle task and trigger watchdog timer
