@@ -28,7 +28,7 @@
 #include "gatts_table.h"
 #include "esp_gatt_common_api.h"
 
-#define GATTS_TABLE_TAG "GATTS_TABLE_DEMO"
+#define GATTS_TABLE_TAG "GATTS_TABLE"
 
 #define PROFILE_NUM 1
 #define PROFILE_APP_IDX 0
