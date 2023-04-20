@@ -661,7 +661,7 @@ void app_main(void)
     
     while (1)
     {
-        if (strlen(ssid) != 0 && strlen(pass) != 0 && strlen(mqtt) != 0 && bluetooth_online == true)
+        if (strlen(ssid) != 0 && strlen(pass) != 0 && strlen(mqtt) != 0 && bluetooth_online == true && wifi_online == false)
         {
             ESP_LOGI("SETTINGS", "ACCEPTED");
             esp_bluedroid_disable();

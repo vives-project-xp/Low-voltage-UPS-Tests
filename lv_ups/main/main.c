@@ -1,7 +1,7 @@
-#include "driver/gpio.h" 
+#include "driver/gpio.h"
 #include "mqtt_client.h"
-#include "esp_log.h"    
-#include "esp_wifi.h"   
+#include "esp_log.h"
+#include "esp_wifi.h"
 #include "esp_system.h"
 #include "esp_event.h"
 #include "nvs_flash.h"
@@ -27,24 +27,26 @@
 #include "gatts_table.h"
 #include "esp_gatt_common_api.h"
 
-//wifi, mqtt and led toggle
+// wifi, mqtt and led toggle
 #define WIFI_CONNECTED_BIT BIT0
-#define WIFI_FAIL_BIT      BIT1
+#define WIFI_FAIL_BIT BIT1
 static int s_retry_num = 0;
 static EventGroupHandle_t s_wifi_event_group;
-#define EXAMPLE_ESP_MAXIMUM_RETRY  5
+#define EXAMPLE_ESP_MAXIMUM_RETRY 5
 #define LED_PIN GPIO_NUM_2
 static esp_mqtt_client_handle_t client;
 static uint8_t led_state = 0;
+bool wifi_online = false;
 //
 
 // ble and wifi variables
 char ssid[32] = "";
-char pass[64] =  "";
-char mqtt[21] = {""};
+char pass[64] = "";
+char mqtt_ip[21] = "";
+char mqtt_url[28] = "";
 //
 
-//ble dependencies, defines and variables
+// ble dependencies, defines and variables
 bool bluetooth_online = false;
 
 int ssid_handle = 30;
@@ -206,13 +208,13 @@ static const uint16_t character_declaration_uuid = ESP_GATT_UUID_CHAR_DECLARE;
 // static const uint16_t character_client_config_uuid = ESP_GATT_UUID_CHAR_CLIENT_CONFIG;
 // static const uint8_t char_prop_read = ESP_GATT_CHAR_PROP_BIT_READ;
 // static const uint8_t char_prop_write = ESP_GATT_CHAR_PROP_BIT_WRITE;
-static const uint8_t char_prop_read_write = ESP_GATT_CHAR_PROP_BIT_READ | ESP_GATT_CHAR_PROP_BIT_WRITE; 
+static const uint8_t char_prop_read_write = ESP_GATT_CHAR_PROP_BIT_READ | ESP_GATT_CHAR_PROP_BIT_WRITE;
 static const uint8_t char_prop_read_write_notify = ESP_GATT_CHAR_PROP_BIT_WRITE | ESP_GATT_CHAR_PROP_BIT_READ | ESP_GATT_CHAR_PROP_BIT_NOTIFY;
 
 static const uint8_t char_value[4] = {0x11, 0x22, 0x33, 0x44};
-//end of ble variables
+// end of ble variables
 
-//ble table creation and event handlers
+// ble table creation and event handlers
 /* Full Database Description - Used to add attributes into the database */
 static const esp_gatts_attr_db_t gatt_db[HRS_IDX_NB] =
     {
@@ -474,18 +476,18 @@ static void gatts_profile_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_
             // the data length of gattc write  must be less than GATTS_DEMO_CHAR_VAL_LEN_MAX.
             ESP_LOGI(GATTS_TABLE_TAG, "GATT_WRITE_EVT, handle = %d, value len = %d, value :", param->write.handle, param->write.len);
             ESP_LOGI(GATTS_TABLE_TAG, "%s", param->write.value);
-            int lenght = param->write.len;
+            int length = param->write.len;
             if (param->write.handle == ssid_handle)
             {
-                memcpy(ssid, param->write.value, lenght);
+                memcpy(ssid, param->write.value, length);
             }
             else if (param->write.handle == pass_handle)
             {
-                memcpy(pass, param->write.value, lenght);
+                memcpy(pass, param->write.value, length);
             }
             else if (param->write.handle == mqtt_handle)
             {
-                memcpy(mqtt, param->write.value, lenght);
+                memcpy(mqtt_url, param->write.value, length);
             }
             /* send response when param->write.need_rsp is true*/
             if (param->write.need_rsp)
@@ -598,7 +600,8 @@ static void gatts_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t gatts_
     } while (0);
 }
 
-void ble_setup(void){
+void ble_setup(void)
+{
     esp_err_t ret;
 
     ESP_ERROR_CHECK(esp_bt_controller_mem_release(ESP_BT_MODE_CLASSIC_BT));
@@ -663,36 +666,44 @@ void ble_setup(void){
 }
 //
 
-//led blink test working
+// led blink test working
 void blink_led(void)
 {
     gpio_set_level(LED_PIN, led_state);
 }
 //
-//wifi event handler
-static void event_handler(void* arg, esp_event_base_t event_base,
-                                int32_t event_id, void* event_data)
+// wifi event handler
+static void event_handler(void *arg, esp_event_base_t event_base,
+                          int32_t event_id, void *event_data)
 {
-    if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_START) {
+    if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_START)
+    {
         esp_wifi_connect();
-    } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
-        if (s_retry_num < EXAMPLE_ESP_MAXIMUM_RETRY) {
+    }
+    else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED)
+    {
+        if (s_retry_num < EXAMPLE_ESP_MAXIMUM_RETRY)
+        {
             esp_wifi_connect();
             s_retry_num++;
             ESP_LOGI("WIFI", "retry to connect to the AP");
-        } else {
+        }
+        else
+        {
             xEventGroupSetBits(s_wifi_event_group, WIFI_FAIL_BIT);
         }
-        ESP_LOGI("WIFI","connect to the AP fail");
-    } else if (event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP) {
-        ip_event_got_ip_t* event = (ip_event_got_ip_t*) event_data;
+        ESP_LOGI("WIFI", "connect to the AP fail");
+    }
+    else if (event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP)
+    {
+        ip_event_got_ip_t *event = (ip_event_got_ip_t *)event_data;
         ESP_LOGI("WIFI", "got ip:" IPSTR, IP2STR(&event->ip_info.ip));
         s_retry_num = 0;
         xEventGroupSetBits(s_wifi_event_group, WIFI_CONNECTED_BIT);
     }
 }
 //
-//Wifi setup
+// Wifi setup
 void wifi_init_sta(void)
 {
     s_wifi_event_group = xEventGroupCreate();
@@ -711,7 +722,7 @@ void wifi_init_sta(void)
                                                         &instance_any_id));
     ESP_ERROR_CHECK(esp_event_handler_instance_register(IP_EVENT,
                                                         IP_EVENT_STA_GOT_IP,
-                                                       &event_handler,
+                                                        &event_handler,
                                                         NULL,
                                                         &instance_got_ip));
 
@@ -725,21 +736,22 @@ void wifi_init_sta(void)
         },
     };
 
-    strncpy((char*)wifi_config.sta.ssid, ssid, sizeof(wifi_config.sta.ssid)-1);
-    strncpy((char*)wifi_config.sta.password, pass, sizeof(wifi_config.sta.password)-1);
+    strncpy((char *)wifi_config.sta.ssid, ssid, sizeof(wifi_config.sta.ssid) - 1);
+    strncpy((char *)wifi_config.sta.password, pass, sizeof(wifi_config.sta.password) - 1);
 
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_config));
     ESP_ERROR_CHECK(esp_wifi_start());
 }
 //
-//mqtt event handler
+// mqtt event handler
 static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_t event_id, void *event_data)
 {
     esp_mqtt_event_handle_t event = event_data;
     esp_mqtt_client_handle_t intrnclient = event->client;
     int msg_id;
-    switch ((esp_mqtt_event_id_t)event_id) {
+    switch ((esp_mqtt_event_id_t)event_id)
+    {
     case MQTT_EVENT_CONNECTED:
         ESP_LOGI("MQTT", "MQTT_EVENT_CONNECTED");
         msg_id = esp_mqtt_client_publish(intrnclient, "homeassistant/battery/InUse", handler_args, 0, 1, 0);
@@ -783,11 +795,12 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
     }
 }
 //
-//mqtt setup
+// mqtt setup
 static void mqtt_app_start(void)
 {
+    sprintf(mqtt_url, "mqtt://%s", mqtt_ip);
     esp_mqtt_client_config_t mqtt_cfg = {
-        .broker.address.uri = "mqtt://10.10.78.77:1883",
+        .broker.address.uri = mqtt_url,
     };
 
     client = esp_mqtt_client_init(&mqtt_cfg);
@@ -796,7 +809,7 @@ static void mqtt_app_start(void)
     esp_mqtt_client_start(client);
 }
 //
-//mqtt publisher
+// mqtt publisher
 static void mqtt_publish_task(char *message)
 {
     int message_id;
@@ -807,39 +820,49 @@ static void mqtt_publish_task(char *message)
 
 void app_main(void)
 {
-    //Wifi code working
     esp_err_t ret = nvs_flash_init();
-    if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
-      ESP_ERROR_CHECK(nvs_flash_erase());
-      ret = nvs_flash_init();
+    if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND)
+    {
+        ESP_ERROR_CHECK(nvs_flash_erase());
+        ret = nvs_flash_init();
     }
     ESP_ERROR_CHECK(ret);
 
-    wifi_init_sta();
-    vTaskDelay(200);
     gpio_set_direction(LED_PIN, GPIO_MODE_OUTPUT);
-    //
 
-    //mqtt code
-    /*ESP_ERROR_CHECK(esp_netif_init());
-    ESP_ERROR_CHECK(esp_event_loop_create_default());*/
-
-    mqtt_app_start();
-
+    ble_setup();
 
     while (1)
     {
-        //blinky led
-        ESP_LOGI("ESP32", "Hello World!");
+        if (strlen(ssid) != 0 && strlen(pass) != 0 && strlen(mqtt_url) != 0 && bluetooth_online == true && wifi_online == false)
+        {
+            ESP_LOGI("SETTINGS", "ACCEPTED");
+            esp_bluedroid_disable();
+            // esp_bluedroid_deinit();
+            esp_bt_controller_disable();
+            // esp_bt_controller_deinit();
+            wifi_init_sta();
+            vTaskDelay(200);
+            mqtt_app_start();
+            wifi_online = true;
+        }
+
+        ESP_LOGI("ssid", "%s", ssid);
+        ESP_LOGI("pass", "%s", pass);
+        ESP_LOGI("mqtt", "%s", mqtt_url);
+        
+        // blinky led
         ESP_LOGI("LED CONTROL", "Turning the LED %s!", led_state == true ? "ON" : "OFF");
         blink_led();
         led_state = !led_state;
         //
-        //mqtt message publish
+        /*
+        // mqtt message publish
         char message[30];
         sprintf(message, "%s", led_state == true ? "1" : "0");
         mqtt_publish_task(message);
-        //
-        vTaskDelay(100); // Add 1 tick delay (10 ms) so that current task does not starve idle task and trigger watchdog timer
+        //*/
+        vTaskDelay(100);
+        
     }
 }
