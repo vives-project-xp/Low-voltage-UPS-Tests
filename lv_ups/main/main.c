@@ -41,9 +41,12 @@ bool wifi_online = false;
 
 // ble and wifi variables
 char ssid[32] = "";
+size_t ssid_size = sizeof(ssid);
 char pass[64] = "";
+size_t pass_size = sizeof(pass);
 char mqtt_ip[21] = "";
 char mqtt_url[28] = "";
+size_t mqtt_ip_size = sizeof(mqtt_ip);
 //
 
 // ble dependencies, defines and variables
@@ -53,6 +56,13 @@ int ssid_handle = 30;
 int pass_handle = 31;
 int mqtt_handle = 32;
 int cnt = 0;
+//
+
+// flash memory defines
+#define FLASH_NAMESPACE "wifi_creds"
+nvs_handle_t wifi_handle;
+bool wifi_creds = false;
+//
 
 #define GATTS_TABLE_TAG "GATTS_TABLE"
 
@@ -487,7 +497,7 @@ static void gatts_profile_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_
             }
             else if (param->write.handle == mqtt_handle)
             {
-                memcpy(mqtt_url, param->write.value, length);
+                memcpy(mqtt_ip, param->write.value, length);
             }
             /* send response when param->write.need_rsp is true*/
             if (param->write.need_rsp)
@@ -703,47 +713,7 @@ static void event_handler(void *arg, esp_event_base_t event_base,
     }
 }
 //
-// Wifi setup
-void wifi_init_sta(void)
-{
-    s_wifi_event_group = xEventGroupCreate();
 
-    ESP_ERROR_CHECK(esp_netif_init());
-
-    ESP_ERROR_CHECK(esp_event_loop_create_default());
-    esp_netif_create_default_wifi_sta();
-
-    esp_event_handler_instance_t instance_any_id;
-    esp_event_handler_instance_t instance_got_ip;
-    ESP_ERROR_CHECK(esp_event_handler_instance_register(WIFI_EVENT,
-                                                        ESP_EVENT_ANY_ID,
-                                                        &event_handler,
-                                                        NULL,
-                                                        &instance_any_id));
-    ESP_ERROR_CHECK(esp_event_handler_instance_register(IP_EVENT,
-                                                        IP_EVENT_STA_GOT_IP,
-                                                        &event_handler,
-                                                        NULL,
-                                                        &instance_got_ip));
-
-    wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
-    ESP_ERROR_CHECK(esp_wifi_init(&cfg));
-
-    wifi_config_t wifi_config = {
-        .sta = {
-            .ssid = "",
-            .password = "",
-        },
-    };
-
-    strncpy((char *)wifi_config.sta.ssid, ssid, sizeof(wifi_config.sta.ssid) - 1);
-    strncpy((char *)wifi_config.sta.password, pass, sizeof(wifi_config.sta.password) - 1);
-
-    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
-    ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_config));
-    ESP_ERROR_CHECK(esp_wifi_start());
-}
-//
 // mqtt event handler
 static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_t event_id, void *event_data)
 {
@@ -754,7 +724,10 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
     {
     case MQTT_EVENT_CONNECTED:
         ESP_LOGI("MQTT", "MQTT_EVENT_CONNECTED");
-        msg_id = esp_mqtt_client_publish(intrnclient, "homeassistant/battery/InUse", handler_args, 0, 1, 0);
+        msg_id = esp_mqtt_client_publish(intrnclient, "homeassistant/battery/Charge", handler_args, 0, 1, 0);
+        ESP_LOGI("MQTT", "sent publish successful, msg_id=%d", msg_id);
+
+        msg_id = esp_mqtt_client_publish(intrnclient, "homeassistant/battery/Online", handler_args, 0, 1, 0);
         ESP_LOGI("MQTT", "sent publish successful, msg_id=%d", msg_id);
 
         msg_id = esp_mqtt_client_subscribe(intrnclient, "homeassistant/battery/reset", 0);
@@ -795,8 +768,9 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
     }
 }
 //
-// mqtt setup
-static void mqtt_app_start(void)
+
+//mqtt setup
+void mqtt_app_start(void)
 {
     sprintf(mqtt_url, "mqtt://%s", mqtt_ip);
     esp_mqtt_client_config_t mqtt_cfg = {
@@ -807,19 +781,140 @@ static void mqtt_app_start(void)
     /* The last argument may be used to pass data to the event handler, in this example mqtt_event_handler */
     esp_mqtt_client_register_event(client, ESP_EVENT_ANY_ID, mqtt_event_handler, NULL);
     esp_mqtt_client_start(client);
+
+    vTaskDelay(100);
+
+    esp_mqtt_client_publish(client, "homeassistant/battery/Online", "1", 0, 0, 0);
 }
 //
+
+// Wifi setup
+void wifi_init_sta(void)
+{
+    s_wifi_event_group = xEventGroupCreate();
+
+    ESP_ERROR_CHECK(esp_netif_init());
+
+    ESP_ERROR_CHECK(esp_event_loop_create_default());
+    esp_netif_create_default_wifi_sta();
+
+    esp_event_handler_instance_t instance_any_id;
+    esp_event_handler_instance_t instance_got_ip;
+    ESP_ERROR_CHECK(esp_event_handler_instance_register(WIFI_EVENT,
+                                                        ESP_EVENT_ANY_ID,
+                                                        &event_handler,
+                                                        NULL,
+                                                        &instance_any_id));
+    ESP_ERROR_CHECK(esp_event_handler_instance_register(IP_EVENT,
+                                                        IP_EVENT_STA_GOT_IP,
+                                                        &event_handler,
+                                                        NULL,
+                                                        &instance_got_ip));
+
+    wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
+    ESP_ERROR_CHECK(esp_wifi_init(&cfg));
+
+    wifi_config_t wifi_config = {
+        .sta = {
+            .ssid = "",
+            .password = "",
+        },
+    };
+
+    strncpy((char *)wifi_config.sta.ssid, ssid, sizeof(wifi_config.sta.ssid) - 1);
+    strncpy((char *)wifi_config.sta.password, pass, sizeof(wifi_config.sta.password) - 1);
+
+    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
+    ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_config));
+    ESP_ERROR_CHECK(esp_wifi_start());
+    mqtt_app_start();
+}
+//
+
+
+/*
 // mqtt publisher
 static void mqtt_publish_task(char *message)
 {
     int message_id;
     message_id = esp_mqtt_client_publish(client, "homeassistant/battery/InUse", message, 0, 0, 0);
     ESP_LOGI("MQTT", "Published message with ID %d: %s", message_id, message);
-}
+}*/
 //
+
+void wifi_flash(void)
+{
+    // char buffer[32];
+    // size_t size = sizeof(buffer);
+    esp_err_t ret = nvs_open(FLASH_NAMESPACE, NVS_READWRITE, &wifi_handle);
+    ESP_LOGI("flash mem", "NVS open return: %s", esp_err_to_name(ret));
+
+    ret = nvs_get_str(wifi_handle, "ssid_key", &ssid, &ssid_size);
+    ret = nvs_get_str(wifi_handle, "pass_key", &pass, &pass_size);
+    ret = nvs_get_str(wifi_handle, "mqtt_key", &mqtt_ip, &mqtt_ip_size);
+    if (ret != ESP_OK)
+    {
+        ESP_LOGI("flash mem", "Failed to read NVS flash");
+        ESP_LOGI("flash mem", "ERROR: %s", esp_err_to_name(ret));
+    }
+    else
+    {
+        ESP_LOGI("flash mem", "Variables read");
+    }
+    nvs_close(wifi_handle);
+
+    ESP_LOGI("strlen ssid", "%d", strlen(ssid));
+    ESP_LOGI("strlen pass", "%d", strlen(pass));
+    ESP_LOGI("strlen mqtt_url", "%d", strlen(mqtt_url));
+
+    if (strlen(ssid) != 0 && strlen(pass) != 0 && strlen(mqtt_url) != 0)
+    {
+        wifi_creds = true;
+    }
+    else
+    {
+        wifi_creds = false;
+    }
+
+    if (wifi_creds == true && wifi_online == false)
+    {
+        wifi_init_sta();
+    }
+    else if (wifi_creds == false && bluetooth_online == false)
+    {
+        ble_setup();
+    }
+}
+
+/*void nvs_setup(void)
+{
+    esp_err_t ret = nvs_open(FLASH_NAMESPACE, NVS_READWRITE, &wifi_handle);
+    if (ret != ESP_OK)
+    {
+        ESP_LOGI("flash mem", "Error (%s) opening NVS handle", esp_err_to_name(ret));
+    }
+    else
+    {
+
+        //check if a value is present
+        ret = nvs_set_str(wifi_handle, "ssid_key", "");
+        ret = nvs_set_str(wifi_handle, "pass_key", "");
+        ret = nvs_set_str(wifi_handle, "mqtt_key", "");
+        if (ret != ESP_OK)
+        {
+            ESP_LOGI("flash mem", "Error (%s) writing NVS variables", esp_err_to_name(ret));
+        }
+        else
+        {
+            ESP_LOGI("flash mem", "Variables written to NVS successfully");
+        }
+    }
+    nvs_close(wifi_handle);
+}*/
 
 void app_main(void)
 {
+
     esp_err_t ret = nvs_flash_init();
     if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND)
     {
@@ -830,27 +925,75 @@ void app_main(void)
 
     gpio_set_direction(LED_PIN, GPIO_MODE_OUTPUT);
 
-    ble_setup();
+    // nvs_setup();
+
+    wifi_flash();
+    // ble_setup();
 
     while (1)
     {
-        if (strlen(ssid) != 0 && strlen(pass) != 0 && strlen(mqtt_url) != 0 && bluetooth_online == true && wifi_online == false)
+
+        if (strlen(ssid) != 0 && strlen(pass) != 0 && strlen(mqtt_ip) != 0 && bluetooth_online == true && wifi_online == false)
         {
             ESP_LOGI("SETTINGS", "ACCEPTED");
+
+            ret = nvs_open(FLASH_NAMESPACE, NVS_READWRITE, &wifi_handle);
+            if (ret != ESP_OK)
+            {
+                ESP_LOGI("flash mem", "Error (%s) opening NVS handle", esp_err_to_name(ret));
+            }
+            else
+            {
+                ret = nvs_set_str(wifi_handle, "ssid_key", ssid);
+                ret = nvs_set_str(wifi_handle, "pass_key", pass);
+                ret = nvs_set_str(wifi_handle, "mqtt_key", mqtt_ip);
+                if (ret != ESP_OK)
+                {
+                    ESP_LOGI("flash mem", "Error (%s) writing NVS variables", esp_err_to_name(ret));
+                }
+                else
+                {
+                    ESP_LOGI("flash mem", "Variables written to NVS successfully");
+                }
+                ret = nvs_commit(wifi_handle);
+                if (ret != ESP_OK)
+                {
+                    ESP_LOGI("nvs commit", "Error (%s)", esp_err_to_name(ret));
+                }
+            }
+
+            nvs_close(wifi_handle);
+
             esp_bluedroid_disable();
-            // esp_bluedroid_deinit();
             esp_bt_controller_disable();
-            // esp_bt_controller_deinit();
             wifi_init_sta();
             vTaskDelay(200);
-            mqtt_app_start();
             wifi_online = true;
         }
 
-        ESP_LOGI("ssid", "%s", ssid);
+        /*ESP_LOGI("ssid", "%s", ssid);
         ESP_LOGI("pass", "%s", pass);
-        ESP_LOGI("mqtt", "%s", mqtt_url);
-        
+        ESP_LOGI("mqtt", "%s", mqtt_url);*/
+        char ssid_test[32];
+        size_t ssid_len = sizeof(ssid_test);
+        char pass_test[32];
+        size_t pass_len = sizeof(pass_test);
+
+        ret = nvs_open(FLASH_NAMESPACE, NVS_READWRITE, &wifi_handle);
+        ret = nvs_get_str(wifi_handle, "ssid_key", &ssid_test, &ssid_len);
+        ret = nvs_get_str(wifi_handle, "pass_key", &pass_test, &pass_len);
+        nvs_close(wifi_handle);
+
+        if (ret != ESP_OK)
+        {
+            ESP_LOGI("flash mem", "Error (%s) reading the test ssid", esp_err_to_name(ret));
+        }
+
+        ESP_LOGI("ssid_test", "%s", ssid_test);
+        ESP_LOGI("pass_test", "%s", pass_test);
+        wifi_flash();
+        ESP_LOGI("wifi creds", "%d", wifi_creds);
+
         // blinky led
         ESP_LOGI("LED CONTROL", "Turning the LED %s!", led_state == true ? "ON" : "OFF");
         blink_led();
@@ -861,8 +1004,8 @@ void app_main(void)
         char message[30];
         sprintf(message, "%s", led_state == true ? "1" : "0");
         mqtt_publish_task(message);
-        //*/
+        //
+        */
         vTaskDelay(100);
-        
     }
 }
