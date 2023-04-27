@@ -13,19 +13,15 @@
 #include "freertos/queue.h"
 #include "freertos/event_groups.h"
 
-#include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
-#include "freertos/event_groups.h"
-#include "esp_system.h"
-#include "esp_log.h"
-#include "nvs_flash.h"
 #include "esp_bt.h"
-
 #include "esp_gap_ble_api.h"
 #include "esp_gatts_api.h"
 #include "esp_bt_main.h"
 #include "gatts_table.h"
 #include "esp_gatt_common_api.h"
+
+#include "cJSON.h"
+#include "esp_timer.h"
 
 // wifi, mqtt and led toggle
 #define WIFI_CONNECTED_BIT BIT0
@@ -34,8 +30,9 @@ static int s_retry_num = 0;
 static EventGroupHandle_t s_wifi_event_group;
 #define EXAMPLE_ESP_MAXIMUM_RETRY 5
 int leds[] = {GPIO_NUM_13, GPIO_NUM_14};
-#define BLE_LED 1
-#define MQTT_LED 2
+#define BLE_LED 0
+#define MQTT_LED 1
+#define BUTTON_1 GPIO_NUM_12
 /*#define BLE_LED_PIN GPIO_NUM_13
 #define MQTT_LED_PIN GPIO_NUM_14*/
 static esp_mqtt_client_handle_t client;
@@ -53,6 +50,16 @@ size_t mqtt_ip_size = sizeof(mqtt_ip);
 char mqtt_url[28] = "";
 //
 
+//mqtt variable
+char command[] = "";
+size_t command_len;
+char *lvups_status = "";
+//
+
+//sensor variables 
+bool charging = false;
+//
+
 // ble dependencies, defines and variables
 bool bluetooth_online = false;
 bool device_connected = false;
@@ -66,7 +73,7 @@ int cnt = 0;
 // flash memory defines
 #define FLASH_NAMESPACE "wifi_creds"
 nvs_handle_t wifi_handle;
-bool wifi_creds = false;
+
 //
 
 #define GATTS_TABLE_TAG "GATTS_TABLE"
@@ -542,9 +549,11 @@ static void gatts_profile_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_
         conn_params.timeout = 400;  // timeout = 400*10ms = 4000ms
         // start sent the update connection parameters to the peer device.
         esp_ble_gap_update_conn_params(&conn_params);
+        device_connected = true;
         break;
     case ESP_GATTS_DISCONNECT_EVT:
         ESP_LOGI(GATTS_TABLE_TAG, "ESP_GATTS_DISCONNECT_EVT, reason = 0x%x", param->disconnect.reason);
+        device_connected = false;
         esp_ble_gap_start_advertising(&adv_params);
         break;
     case ESP_GATTS_CREAT_ATTR_TAB_EVT:
@@ -732,20 +741,15 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
     {
     case MQTT_EVENT_CONNECTED:
         ESP_LOGI("MQTT", "MQTT_EVENT_CONNECTED");
-        msg_id = esp_mqtt_client_publish(intrnclient, "homeassistant/battery/Charge", handler_args, 0, 1, 0);
+        msg_id = esp_mqtt_client_publish(intrnclient, "lvups/battery/STATE", handler_args, 0, 1, 0);
         ESP_LOGI("MQTT", "sent publish successful, msg_id=%d", msg_id);
 
-        msg_id = esp_mqtt_client_publish(intrnclient, "homeassistant/battery/Online", handler_args, 0, 1, 0);
+        msg_id = esp_mqtt_client_publish(intrnclient, "lvups/battery/INFO", handler_args, 0, 1, 1);
         ESP_LOGI("MQTT", "sent publish successful, msg_id=%d", msg_id);
 
-        msg_id = esp_mqtt_client_subscribe(intrnclient, "homeassistant/battery/reset", 0);
+        msg_id = esp_mqtt_client_subscribe(intrnclient, "lvups/battery/COMMAND", 0);
         ESP_LOGI("MQTT", "sent subscribe successful, msg_id=%d", msg_id);
 
-        /*msg_id = esp_mqtt_client_subscribe(intrnclient, "/topic/qos1", 1);
-        ESP_LOGI("MQTT", "sent subscribe successful, msg_id=%d", msg_id);*/
-
-        /*msg_id = esp_mqtt_client_unsubscribe(intrnclient, "/topic/qos1");
-        ESP_LOGI("MQTT", "sent unsubscribe successful, msg_id=%d", msg_id);*/
         break;
     case MQTT_EVENT_DISCONNECTED:
         ESP_LOGI("MQTT", "MQTT_EVENT_DISCONNECTED");
@@ -766,6 +770,8 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
         ESP_LOGI("MQTT", "MQTT_EVENT_DATA");
         printf("TOPIC=%.*s\r\n", event->topic_len, event->topic);
         printf("DATA=%.*s\r\n", event->data_len, event->data);
+        command_len = event->data_len;
+        memcpy(command, event->data, command_len);
         break;
     case MQTT_EVENT_ERROR:
         ESP_LOGI("MQTT", "MQTT_EVENT_ERROR");
@@ -789,10 +795,8 @@ void mqtt_app_start(void)
     /* The last argument may be used to pass data to the event handler, in this example mqtt_event_handler */
     esp_mqtt_client_register_event(client, ESP_EVENT_ANY_ID, mqtt_event_handler, NULL);
     esp_mqtt_client_start(client);
-
-    vTaskDelay(100);
-
-    esp_mqtt_client_publish(client, "homeassistant/battery/Online", "1", 0, 0, 0);
+    vTaskDelay(200);
+    esp_mqtt_client_publish(client, "lvups/battery/INFO", "{\"Firmware_version\":\"v0.0.1\",\"Hardware_version\":\"sucks\"}", 0, 1, 1);
 }
 //
 
@@ -840,15 +844,6 @@ void wifi_init_sta(void)
 }
 //
 
-/*
-// mqtt publisher
-static void mqtt_publish_task(char *message)
-{
-    int message_id;
-    message_id = esp_mqtt_client_publish(client, "homeassistant/battery/InUse", message, 0, 0, 0);
-    ESP_LOGI("MQTT", "Published message with ID %d: %s", message_id, message);
-}*/
-//
 
 void wifi_flash(void)
 {
@@ -889,20 +884,11 @@ void wifi_flash(void)
             ble_setup();
         }
     }
-
-    /*if (wifi_creds == true && wifi_online == false)
-    {
-        wifi_init_sta();
-    }
-    else if (wifi_creds == false && bluetooth_online == false)
-    {
-        ble_setup();
-    }*/
 }
 
 void app_main(void)
 {
-
+    esp_timer_early_init();
     esp_err_t ret = nvs_flash_init();
     if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND)
     {
@@ -913,12 +899,24 @@ void app_main(void)
 
     gpio_set_direction(leds[BLE_LED], GPIO_MODE_OUTPUT);
     gpio_set_direction(leds[MQTT_LED], GPIO_MODE_OUTPUT);
+    gpio_set_direction(BUTTON_1, GPIO_MODE_INPUT);
+    gpio_set_pull_mode(BUTTON_1, GPIO_PULLUP_ONLY);
+    gpio_set_level(leds[BLE_LED], 1);
+    gpio_set_level(leds[MQTT_LED], 1);
 
     wifi_flash();
+
+    cJSON *lvups_json = cJSON_CreateObject();
+    cJSON_AddNumberToObject(lvups_json, "Uptime", 0);
+    cJSON_AddBoolToObject(lvups_json, "Battery_IsCharging", false);
+    cJSON_AddNumberToObject(lvups_json, "Battery_Percentage", 0);
+    cJSON_AddBoolToObject(lvups_json, "Battery_InUse", false);
+    cJSON_AddBoolToObject(lvups_json, "RecievingPower", false);
 
     ESP_LOGI("strlen ssid", "%d", strlen(ssid));
     ESP_LOGI("strlen pass", "%d", strlen(pass));
     ESP_LOGI("strlen mqtt_url", "%d", strlen(mqtt_ip));
+
 
     while (bluetooth_online == true)
     {
@@ -955,36 +953,57 @@ void app_main(void)
             esp_restart();
         }
 
+        ESP_LOGI("device connected", "%d", device_connected);
         if (device_connected == false)
         {
             blink_led(BLE_LED, 50);
         }
         else
         {
-            gpio_set_level(BLE_LED, 1);
+            gpio_set_level(leds[BLE_LED], 0);
+            vTaskDelay(10);
         }
     }
 
     while (1)
     {
+        cJSON *command_json = cJSON_Parse(command);
+        cJSON *value = cJSON_GetObjectItem(command_json, "Battery_Charge");
+        if(cJSON_IsTrue(value)){
+            charging = true;
+        }
+        else {
+            charging = false;
+        }
+
+        ESP_LOGI("charging", "%d", charging);
+
+        int uptime = esp_timer_get_time();
+        uptime = uptime / 1000000;
+        ESP_LOGI("uptime", "%d", uptime);
+
+        cJSON_ReplaceItemInObject(lvups_json, "Uptime", cJSON_CreateNumber(uptime));
+
+        lvups_status = cJSON_Print(lvups_json);
+        esp_mqtt_client_publish(client, "lvups/battery/STATE", lvups_status, 0, 0, 0);
+        
+        int nvs_button = gpio_get_level(BUTTON_1);
+        if (nvs_button == 0)
+        {
+            nvs_flash_erase();
+            ESP_LOGI("button", "nvs erased");
+        }
 
         ESP_LOGI("ssid", "%s", ssid);
         ESP_LOGI("pass", "%s", pass);
         ESP_LOGI("mqtt url", "%s", mqtt_url);
-        ESP_LOGI("wifi creds", "%d", wifi_creds);
 
         // blinky led
         // ESP_LOGI("LED CONTROL", "Turning the LED %s!", led_state == true ? "ON" : "OFF");
-        blink_led(MQTT_LED, 1);
+        blink_led(MQTT_LED, 10);
 
         //
-        /*
-        // mqtt message publish
-        char message[30];
-        sprintf(message, "%s", led_state == true ? "1" : "0");
-        mqtt_publish_task(message);
-        //
-        */
+        
         vTaskDelay(100);
     }
 }

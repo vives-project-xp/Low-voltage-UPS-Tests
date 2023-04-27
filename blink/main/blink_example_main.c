@@ -23,6 +23,7 @@ static const char *TAG = "example";
 #define BLINK_GPIO2 GPIO_NUM_14
 
 
+
 static uint8_t led_state = 0;
 
 void blink_led(void)
@@ -33,11 +34,13 @@ void blink_led(void)
 
 void app_main(void)
 {
-    while (1) {
+    gpio_set_direction(BLINK_GPIO, GPIO_MODE_OUTPUT);
+    gpio_set_level(BLINK_GPIO, 0);
+    /*while (1) {
         ESP_LOGI(TAG, "Turning the LED %s!", led_state == true ? "ON" : "OFF");
         blink_led();
-        /* Toggle the LED state */
+        // Toggle the LED state
         led_state = !led_state;
         vTaskDelay(100);
-    }
+    }*/
 }
