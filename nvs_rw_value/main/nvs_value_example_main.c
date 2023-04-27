@@ -27,7 +27,7 @@ void app_main(void)
         err = nvs_flash_init();
     }
     ESP_ERROR_CHECK( err );
-
+    nvs_flash_erase();
     // Open
     printf("\n");
     printf("Opening Non-Volatile Storage (NVS) handle... ");
