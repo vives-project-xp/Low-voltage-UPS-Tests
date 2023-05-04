@@ -14,7 +14,6 @@ void app_main(void)
     // Modify the JSON data
     cJSON_ReplaceItemInObject(root, "age", cJSON_CreateNumber(test_data));
     cJSON_ReplaceItemInObject(root, "city", cJSON_CreateString(test));
-
     
     // Convert the JSON object to a string
     char *new_json_string = cJSON_Print(root);

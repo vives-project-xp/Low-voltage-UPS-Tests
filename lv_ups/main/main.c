@@ -50,14 +50,32 @@ size_t mqtt_ip_size = sizeof(mqtt_ip);
 char mqtt_url[28] = "";
 //
 
-//mqtt variable
-char command[] = "";
+// mqtt variables
+char name_device[32] = "";
+size_t name_size = sizeof(name_device);
+//char commands[] = "{\"Battery_charge\":false,\"Battery_size\":32000,\"Min_battery_charge\":10,\"Max_battery_charge\":90,\"Restart\":false,\"Use_battery\":false}";
+char commands[] = "";
 size_t command_len;
 char *lvups_status = "";
+char topic_prefix[] = "lvups/";
+char info_topic[64] = "";
+char state_topic[64] = "";
+char command_topic[64] = "";
+char info_name[] = "";
+char state_name[] = "";
+char command_name[] = "";
+
+
 //
 
-//sensor variables 
+// sensor variables
 bool charging = false;
+//
+
+//battery values
+int battery_size = 32000;
+int battery_charge_min = 10;
+int battery_charge_max = 90;
 //
 
 // ble dependencies, defines and variables
@@ -65,8 +83,10 @@ bool bluetooth_online = false;
 bool device_connected = false;
 
 int ssid_handle = 30;
-int pass_handle = 31;
-int mqtt_handle = 32;
+int pass_handle = 30;
+int mqtt_handle = 30;
+int name_handle = 30;
+int status_handle = 30;
 int cnt = 0;
 //
 
@@ -81,7 +101,7 @@ nvs_handle_t wifi_handle;
 #define PROFILE_NUM 1
 #define PROFILE_APP_IDX 0
 #define ESP_APP_ID 0x55
-#define SAMPLE_DEVICE_NAME "UPS-1"
+#define BLE_DEVICE_NAME "UPS-1"
 #define SVC_INST_ID 0
 
 /* The max length of characteristic value. When the GATT client performs a write or prepare write operation,
@@ -220,10 +240,11 @@ static struct gatts_profile_inst heart_rate_profile_tab[PROFILE_NUM] = {
 
 /* Service */
 static const uint16_t GATTS_SERVICE_UUID_TEST = 0x00FF;
-static const uint16_t GATTS_CHAR_UUID_TEST_A = 0xFF01;
-static const uint16_t GATTS_CHAR_UUID_TEST_B = 0xFF02;
-static const uint16_t GATTS_CHAR_UUID_TEST_C = 0xFF03;
+static const uint16_t GATTS_CHAR_UUID_A = 0xFF01;
+static const uint16_t GATTS_CHAR_UUID_B = 0xFF02;
+static const uint16_t GATTS_CHAR_UUID_C = 0xFF03;
 static const uint16_t GATTS_CHAR_UUID_D = 0xFF04;
+static const uint16_t GATTS_CHAR_UUID_E = 0xFF05;
 
 static const uint16_t primary_service_uuid = ESP_GATT_UUID_PRI_SERVICE;
 static const uint16_t character_declaration_uuid = ESP_GATT_UUID_CHAR_DECLARE;
@@ -250,7 +271,7 @@ static const esp_gatts_attr_db_t gatt_db[HRS_IDX_NB] =
 
         /* Characteristic Value */
         [IDX_CHAR_VAL_A] =
-            {{ESP_GATT_AUTO_RSP}, {ESP_UUID_LEN_16, (uint8_t *)&GATTS_CHAR_UUID_TEST_A, ESP_GATT_PERM_READ | ESP_GATT_PERM_WRITE, GATTS_DEMO_CHAR_VAL_LEN_MAX, sizeof(char_value), (uint8_t *)char_value}},
+            {{ESP_GATT_AUTO_RSP}, {ESP_UUID_LEN_16, (uint8_t *)&GATTS_CHAR_UUID_A, ESP_GATT_PERM_READ | ESP_GATT_PERM_WRITE, GATTS_DEMO_CHAR_VAL_LEN_MAX, sizeof(char_value), (uint8_t *)char_value}},
 
         /* Characteristic Declaration */
         [IDX_CHAR_B] =
@@ -258,7 +279,7 @@ static const esp_gatts_attr_db_t gatt_db[HRS_IDX_NB] =
 
         /* Characteristic Value */
         [IDX_CHAR_VAL_B] =
-            {{ESP_GATT_AUTO_RSP}, {ESP_UUID_LEN_16, (uint8_t *)&GATTS_CHAR_UUID_TEST_B, ESP_GATT_PERM_READ | ESP_GATT_PERM_WRITE, GATTS_DEMO_CHAR_VAL_LEN_MAX, sizeof(char_value), (uint8_t *)char_value}},
+            {{ESP_GATT_AUTO_RSP}, {ESP_UUID_LEN_16, (uint8_t *)&GATTS_CHAR_UUID_B, ESP_GATT_PERM_READ | ESP_GATT_PERM_WRITE, GATTS_DEMO_CHAR_VAL_LEN_MAX, sizeof(char_value), (uint8_t *)char_value}},
 
         /* Characteristic Declaration */
         [IDX_CHAR_C] =
@@ -266,15 +287,23 @@ static const esp_gatts_attr_db_t gatt_db[HRS_IDX_NB] =
 
         /* Characteristic Value */
         [IDX_CHAR_VAL_C] =
-            {{ESP_GATT_AUTO_RSP}, {ESP_UUID_LEN_16, (uint8_t *)&GATTS_CHAR_UUID_TEST_C, ESP_GATT_PERM_READ | ESP_GATT_PERM_WRITE, GATTS_DEMO_CHAR_VAL_LEN_MAX, sizeof(char_value), (uint8_t *)char_value}},
+            {{ESP_GATT_AUTO_RSP}, {ESP_UUID_LEN_16, (uint8_t *)&GATTS_CHAR_UUID_C, ESP_GATT_PERM_READ | ESP_GATT_PERM_WRITE, GATTS_DEMO_CHAR_VAL_LEN_MAX, sizeof(char_value), (uint8_t *)char_value}},
 
         /* Characteristic Declaration */
         [IDX_CHAR_D] =
-            {{ESP_GATT_AUTO_RSP}, {ESP_UUID_LEN_16, (uint8_t *)&character_declaration_uuid, ESP_GATT_PERM_READ, CHAR_DECLARATION_SIZE, CHAR_DECLARATION_SIZE, (uint8_t *)&char_prop_read_write_notify}},
+            {{ESP_GATT_AUTO_RSP}, {ESP_UUID_LEN_16, (uint8_t *)&character_declaration_uuid, ESP_GATT_PERM_READ, CHAR_DECLARATION_SIZE, CHAR_DECLARATION_SIZE, (uint8_t *)&char_prop_read_write}},
 
         /* Characteristic Value */
         [IDX_CHAR_VAL_D] =
             {{ESP_GATT_AUTO_RSP}, {ESP_UUID_LEN_16, (uint8_t *)&GATTS_CHAR_UUID_D, ESP_GATT_PERM_READ | ESP_GATT_PERM_WRITE, GATTS_DEMO_CHAR_VAL_LEN_MAX, sizeof(char_value), (uint8_t *)char_value}},
+
+        /* Characteristic Declaration */
+        [IDX_CHAR_E] =
+            {{ESP_GATT_AUTO_RSP}, {ESP_UUID_LEN_16, (uint8_t *)&character_declaration_uuid, ESP_GATT_PERM_READ, CHAR_DECLARATION_SIZE, CHAR_DECLARATION_SIZE, (uint8_t *)&char_prop_read_write_notify}},
+
+        /* Characteristic Value */
+        [IDX_CHAR_VAL_E] =
+            {{ESP_GATT_AUTO_RSP}, {ESP_UUID_LEN_16, (uint8_t *)&GATTS_CHAR_UUID_E, ESP_GATT_PERM_READ | ESP_GATT_PERM_WRITE, GATTS_DEMO_CHAR_VAL_LEN_MAX, sizeof(char_value), (uint8_t *)char_value}},
 
 };
 
@@ -430,7 +459,7 @@ static void gatts_profile_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_
     {
     case ESP_GATTS_REG_EVT:
     {
-        esp_err_t set_dev_name_ret = esp_ble_gap_set_device_name(SAMPLE_DEVICE_NAME);
+        esp_err_t set_dev_name_ret = esp_ble_gap_set_device_name(BLE_DEVICE_NAME);
         if (set_dev_name_ret)
         {
             ESP_LOGE(GATTS_TABLE_TAG, "set device name failed, error code = %x", set_dev_name_ret);
@@ -485,12 +514,20 @@ static void gatts_profile_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_
             break;
         case 2:
             mqtt_handle = param->write.handle;
+            cnt = 3;
+            break;
+        case 3:
+            name_handle = param->write.handle;
+            cnt = 4;
+            break;
+        case 4:
+            status_handle = param->write.handle;
             cnt = 0;
             break;
         default:
             break;
         }
-        ESP_LOGI(GATTS_TABLE_TAG, "ssid_handle: %d, pass_handle: %d, mqtt_handle: %d", ssid_handle, pass_handle, mqtt_handle);
+        ESP_LOGI(GATTS_TABLE_TAG, "ssid_handle: %d, pass_handle: %d, mqtt_handle: %d, name_handle: %d", ssid_handle, pass_handle, mqtt_handle, name_handle);
         break;
     case ESP_GATTS_WRITE_EVT:
         if (!param->write.is_prep)
@@ -510,6 +547,10 @@ static void gatts_profile_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_
             else if (param->write.handle == mqtt_handle)
             {
                 memcpy(mqtt_ip, param->write.value, length);
+            }
+            else if (param->write.handle == name_handle)
+            {
+                memcpy(name_device, param->write.value, length);
             }
             /* send response when param->write.need_rsp is true*/
             if (param->write.need_rsp)
@@ -741,13 +782,13 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
     {
     case MQTT_EVENT_CONNECTED:
         ESP_LOGI("MQTT", "MQTT_EVENT_CONNECTED");
-        msg_id = esp_mqtt_client_publish(intrnclient, "lvups/battery/STATE", handler_args, 0, 1, 0);
-        ESP_LOGI("MQTT", "sent publish successful, msg_id=%d", msg_id);
+        //msg_id = esp_mqtt_client_publish(intrnclient, state_topic, handler_args, 0, 1, 0);
+        //ESP_LOGI("MQTT", "sent publish successful, msg_id=%d", msg_id);
 
-        msg_id = esp_mqtt_client_publish(intrnclient, "lvups/battery/INFO", handler_args, 0, 1, 1);
-        ESP_LOGI("MQTT", "sent publish successful, msg_id=%d", msg_id);
+        //msg_id = esp_mqtt_client_publish(intrnclient, info_topic, handler_args, 0, 1, 1);
+        //ESP_LOGI("MQTT", "sent publish successful, msg_id=%d", msg_id);
 
-        msg_id = esp_mqtt_client_subscribe(intrnclient, "lvups/battery/COMMAND", 0);
+        msg_id = esp_mqtt_client_subscribe(intrnclient, command_topic, 0);
         ESP_LOGI("MQTT", "sent subscribe successful, msg_id=%d", msg_id);
 
         break;
@@ -771,7 +812,7 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
         printf("TOPIC=%.*s\r\n", event->topic_len, event->topic);
         printf("DATA=%.*s\r\n", event->data_len, event->data);
         command_len = event->data_len;
-        memcpy(command, event->data, command_len);
+        memcpy(commands, event->data, command_len);
         break;
     case MQTT_EVENT_ERROR:
         ESP_LOGI("MQTT", "MQTT_EVENT_ERROR");
@@ -786,6 +827,9 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
 // mqtt setup
 void mqtt_app_start(void)
 {
+    sprintf(info_topic, "lvups/%s/INFO", name_device);
+    sprintf(state_topic, "lvups/%s/STATE", name_device);
+    sprintf(command_topic, "lvups/%s/COMMAND",name_device);
     sprintf(mqtt_url, "mqtt://%s", mqtt_ip);
     esp_mqtt_client_config_t mqtt_cfg = {
         .broker.address.uri = mqtt_url,
@@ -796,7 +840,7 @@ void mqtt_app_start(void)
     esp_mqtt_client_register_event(client, ESP_EVENT_ANY_ID, mqtt_event_handler, NULL);
     esp_mqtt_client_start(client);
     vTaskDelay(200);
-    esp_mqtt_client_publish(client, "lvups/battery/INFO", "{\"Firmware_version\":\"v0.0.1\",\"Hardware_version\":\"sucks\"}", 0, 1, 1);
+    esp_mqtt_client_publish(client, info_topic , "{\"Firmware_version\":\"v0.0.1\",\"Hardware_version\":\"sucks\"}", 0, 1, 1);
 }
 //
 
@@ -844,17 +888,16 @@ void wifi_init_sta(void)
 }
 //
 
-
 void wifi_flash(void)
 {
-    // char buffer[32];
-    // size_t size = sizeof(buffer);
     esp_err_t ret = nvs_open(FLASH_NAMESPACE, NVS_READWRITE, &wifi_handle);
     ESP_LOGI("flash mem", "NVS open return: %s", esp_err_to_name(ret));
 
     ret = nvs_get_str(wifi_handle, "ssid_key", &ssid, &ssid_size);
     ret = nvs_get_str(wifi_handle, "pass_key", &pass, &pass_size);
     ret = nvs_get_str(wifi_handle, "mqtt_key", &mqtt_ip, &mqtt_ip_size);
+    ret = nvs_get_str(wifi_handle, "name_key", &name_device, &name_size);
+    
     if (ret != ESP_OK)
     {
         ESP_LOGI("flash mem", "Failed to read NVS flash");
@@ -865,10 +908,6 @@ void wifi_flash(void)
         ESP_LOGI("flash mem", "Variables read");
     }
     nvs_close(wifi_handle);
-
-    ESP_LOGI("strlen ssid", "%d", strlen(ssid));
-    ESP_LOGI("strlen pass", "%d", strlen(pass));
-    ESP_LOGI("strlen mqtt_url", "%d", strlen(mqtt_ip));
 
     if (strlen(ssid) != 0 && strlen(pass) != 0 && strlen(mqtt_ip) != 0)
     {
@@ -886,6 +925,28 @@ void wifi_flash(void)
     }
 }
 
+void gpio_setup(){
+    gpio_set_direction(leds[BLE_LED], GPIO_MODE_OUTPUT);
+    gpio_set_direction(leds[MQTT_LED], GPIO_MODE_OUTPUT);
+    gpio_set_direction(BUTTON_1, GPIO_MODE_INPUT);
+    gpio_set_pull_mode(BUTTON_1, GPIO_PULLUP_ONLY);
+    gpio_set_level(leds[BLE_LED], 1);
+    gpio_set_level(leds[MQTT_LED], 1);
+}
+
+cJSON* json_setup(void){
+    cJSON *lvups_json = cJSON_CreateObject();
+    cJSON_AddNumberToObject(lvups_json, "Uptime", 0);
+    cJSON_AddBoolToObject(lvups_json, "Charging_battery", false);
+    cJSON_AddNumberToObject(lvups_json, "Battery_percentage", 0);
+    cJSON_AddBoolToObject(lvups_json, "Using_battery", false);
+    cJSON_AddBoolToObject(lvups_json, "Receiving_power", false);
+    cJSON_AddStringToObject(lvups_json, "Charge_time", "0");
+    cJSON_AddStringToObject(lvups_json, "Discharge_time", "0");
+    cJSON_AddStringToObject(lvups_json, "Discharge_time_ml", "0");
+    return lvups_json;
+}
+
 void app_main(void)
 {
     esp_timer_early_init();
@@ -897,26 +958,9 @@ void app_main(void)
     }
     ESP_ERROR_CHECK(ret);
 
-    gpio_set_direction(leds[BLE_LED], GPIO_MODE_OUTPUT);
-    gpio_set_direction(leds[MQTT_LED], GPIO_MODE_OUTPUT);
-    gpio_set_direction(BUTTON_1, GPIO_MODE_INPUT);
-    gpio_set_pull_mode(BUTTON_1, GPIO_PULLUP_ONLY);
-    gpio_set_level(leds[BLE_LED], 1);
-    gpio_set_level(leds[MQTT_LED], 1);
-
+    gpio_setup();
     wifi_flash();
-
-    cJSON *lvups_json = cJSON_CreateObject();
-    cJSON_AddNumberToObject(lvups_json, "Uptime", 0);
-    cJSON_AddBoolToObject(lvups_json, "Battery_IsCharging", false);
-    cJSON_AddNumberToObject(lvups_json, "Battery_Percentage", 0);
-    cJSON_AddBoolToObject(lvups_json, "Battery_InUse", false);
-    cJSON_AddBoolToObject(lvups_json, "RecievingPower", false);
-
-    ESP_LOGI("strlen ssid", "%d", strlen(ssid));
-    ESP_LOGI("strlen pass", "%d", strlen(pass));
-    ESP_LOGI("strlen mqtt_url", "%d", strlen(mqtt_ip));
-
+    cJSON *lvups_json = json_setup();
 
     while (bluetooth_online == true)
     {
@@ -934,6 +978,8 @@ void app_main(void)
                 ret = nvs_set_str(wifi_handle, "ssid_key", ssid);
                 ret = nvs_set_str(wifi_handle, "pass_key", pass);
                 ret = nvs_set_str(wifi_handle, "mqtt_key", mqtt_ip);
+                ret = nvs_set_str(wifi_handle, "name_key", name_device);
+
                 if (ret != ESP_OK)
                 {
                     ESP_LOGI("flash mem", "Error (%s) writing NVS variables", esp_err_to_name(ret));
@@ -953,7 +999,8 @@ void app_main(void)
             esp_restart();
         }
 
-        ESP_LOGI("device connected", "%d", device_connected);
+        ESP_LOGI("device name", "%s", name_device);
+
         if (device_connected == false)
         {
             blink_led(BLE_LED, 50);
@@ -967,26 +1014,58 @@ void app_main(void)
 
     while (1)
     {
-        cJSON *command_json = cJSON_Parse(command);
-        cJSON *value = cJSON_GetObjectItem(command_json, "Battery_Charge");
-        if(cJSON_IsTrue(value)){
+        cJSON *commands_json = cJSON_Parse(commands);
+
+        cJSON *charging_command = cJSON_GetObjectItem(commands_json, "Charge_battery");
+        cJSON *restart_command = cJSON_GetObjectItem(commands_json, "Restart");
+        //cJSON *use_battery_command = cJSON_GetObjectItem(commands_json, "Use_battery");
+        cJSON *size_command = cJSON_GetObjectItem(commands_json, "Battery_size");
+        cJSON *min_charge_command = cJSON_GetObjectItem(commands_json, "Min_battery_charge");
+        cJSON *max_charge_command = cJSON_GetObjectItem(commands_json, "Max_battery_charge");
+
+        if (size_command != NULL){
+            battery_size = cJSON_GetNumberValue(size_command);
+        }
+
+        if (min_charge_command != NULL){
+            battery_charge_min = cJSON_GetNumberValue(min_charge_command);
+        }
+
+        if (max_charge_command != NULL){
+            battery_charge_max = cJSON_GetNumberValue(max_charge_command);
+        }
+        
+        if (cJSON_IsTrue(charging_command))
+        {
             charging = true;
         }
-        else {
+        else
+        {
             charging = false;
         }
 
-        ESP_LOGI("charging", "%d", charging);
+        if (cJSON_IsTrue(restart_command)){
+            esp_restart();
+        }
 
-        int uptime = esp_timer_get_time();
+        ESP_LOGI("charging", "%d", charging);
+        ESP_LOGI("size", "%d", battery_size);
+        ESP_LOGI("min charge", "%d", battery_charge_min);
+        ESP_LOGI("max charge", "%d", battery_charge_max);
+        ESP_LOGI("device name", "%s", name_device);
+        ESP_LOGI("topics", "%s, %s, %s", info_topic, state_topic, command_topic);
+        
+        cJSON_Delete(commands_json);
+
+        int64_t uptime = esp_timer_get_time();
         uptime = uptime / 1000000;
-        ESP_LOGI("uptime", "%d", uptime);
+        printf("uptime %lld \n", uptime);
 
         cJSON_ReplaceItemInObject(lvups_json, "Uptime", cJSON_CreateNumber(uptime));
 
         lvups_status = cJSON_Print(lvups_json);
-        esp_mqtt_client_publish(client, "lvups/battery/STATE", lvups_status, 0, 0, 0);
-        
+        esp_mqtt_client_publish(client, state_topic, lvups_status, 0, 0, 0);
+
         int nvs_button = gpio_get_level(BUTTON_1);
         if (nvs_button == 0)
         {
@@ -994,16 +1073,8 @@ void app_main(void)
             ESP_LOGI("button", "nvs erased");
         }
 
-        ESP_LOGI("ssid", "%s", ssid);
-        ESP_LOGI("pass", "%s", pass);
-        ESP_LOGI("mqtt url", "%s", mqtt_url);
-
-        // blinky led
-        // ESP_LOGI("LED CONTROL", "Turning the LED %s!", led_state == true ? "ON" : "OFF");
         blink_led(MQTT_LED, 10);
 
-        //
-        
         vTaskDelay(100);
     }
 }
